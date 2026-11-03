@@ -5,8 +5,6 @@
 #include <stdlib.h>
 #include <stdio.h>
 
-
-const int BUF_SIZE = 42 * 4096;
 typedef struct client {
     int id;
     char msg[110000];
@@ -15,8 +13,8 @@ typedef struct client {
 t_client clients[1024];
 
 int max = 0, next_id = 0;
-fd_set fds, wfds, rfds;
-char bufRead[BUF_SIZE], bufWrite[BUF_SIZE];
+fd_set fds, rfds, wfds;
+char bufRead[120000], bufWrite[120000];
 
 void fatal_error() {
     write(2, "Fatal error\n", 12);
@@ -25,7 +23,7 @@ void fatal_error() {
 
 void send_all(int s) {
     for (int i = 0; i <= max; i++)
-        if (FD_ISSET(i, &rfds) && i != s)
+        if (FD_ISSET(i, &wfds) && i != s)
             send(i, bufWrite, strlen(bufWrite), 0);
 }
 
@@ -35,7 +33,7 @@ int main(int ac, char **av) {
         exit(1);
     }
 
-    bzero(&clients, sizeof(clients));
+    bzero(clients, sizeof(clients));
     FD_ZERO(&fds);
 
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -57,11 +55,11 @@ int main(int ac, char **av) {
         fatal_error();
 
     while (1) {
-        wfds = rfds = fds;
-        if (select(max + 1, &wfds, &rfds, NULL, NULL) < 0)
+        rfds = wfds = fds;
+        if (select(max + 1, &rfds, &wfds, NULL, NULL) < 0)
             continue ;
         for (int s = 0; s <= max; s++) {
-            if (FD_ISSET(s, &wfds) && s == sockfd) {
+            if (FD_ISSET(s, &rfds) && s == sockfd) {
                 int clientSock = accept(sockfd, (struct sockaddr *)&addr, &addr_len);
                 if (clientSock < 0)
                     continue ;
@@ -72,13 +70,14 @@ int main(int ac, char **av) {
                 send_all(clientSock);
                 break ;
             }
-            if (FD_ISSET(s, &wfds) && s != sockfd) {
-                int res = recv(s, bufRead, 42*4096, 0);
+            if (FD_ISSET(s, &rfds) && s != sockfd) {
+                int res = recv(s, bufRead, sizeof(bufRead), 0);
                 if (res <= 0) {
                     sprintf(bufWrite, "server: client %d just left\n", clients[s].id);
                     send_all(s);
                     FD_CLR(s, &fds);
                     close(s);
+                    bzero(clients[s].msg, strlen(clients[s].msg));
                     break ;
                 }
                 else {
@@ -89,7 +88,7 @@ int main(int ac, char **av) {
                             clients[s].msg[j] = '\0';
                             sprintf(bufWrite, "client %d: %s\n", clients[s].id, clients[s].msg);
                             send_all(s);
-                            bzero(&clients[s].msg, strlen(clients[s].msg));
+                            bzero(clients[s].msg, strlen(clients[s].msg));
                             j = -1;
                         }
                     }
